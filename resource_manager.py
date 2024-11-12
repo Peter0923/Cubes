@@ -49,6 +49,11 @@ class ResourceManger(object):
             vertex_shader="shaders/scene_pick.vs",
             fragment_shader="shaders/scene_pick.fs")
         
+        # live cube shader
+        cls._shaders['live_cube'] = ResourceManger._load_program(
+            vertex_shader="shaders/live_cube.vs",
+            fragment_shader="shaders/live_cube.fs")
+        
         # sounds
         cls._audio['solid'] = pyglet.resource.media("solid.wav", False)
         cls._audio['reset'] = pyglet.resource.media("reset.wav", False)

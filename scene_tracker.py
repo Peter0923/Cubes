@@ -1,54 +1,98 @@
-from logger import logger
+from enum import Enum
 from pyrr import Vector3
-from scene_generator import SceneGenerator, unit_size, half_unit, base_center
+from logger import logger 
+from scene_generator import *
 from resource_manager import ResourceManger
+from scene_objects import AABB, Grid3D
+from scene_linker import LiveCube
 
-near_zero = 0.1
-body_height = 1.5 * unit_size  #not higher than 2 units
-body_clash = 0.1 * unit_size
+ZERO = 1e-6
 
+class ClashType(Enum):
+    NoClash = 0
+    Static = 1
+    LiveNZ = 2
+    LivePZ = 3
+    LiveXY = 4
+    
 class ClashDetector(object):
-    def __init__(self, scene_map):
+    def __init__(self, scene_map, live_map):
         self.scene_map = scene_map
+        self.live_map = live_map
+        self.live_cube = None  #potential clashed live cube
         self.clash_points = 0x00
         self.move_direction = 0x00
         self.land_sound = ResourceManger.get_audio('solid')
-    
+        
     def detect_clash_in_move(self,
                              from_pos: Vector3,
                              to_pos: Vector3):
         self.clash_points = self._get_clash_points(to_pos)
-        current_pos = self._decide_next_move(from_pos, to_pos)
-        fall_down = self._is_on_air(current_pos)
-        return (current_pos, fall_down)
-     
+        return self._decide_next_move(from_pos, to_pos)
+    
     def detect_clash_in_fly(self, 
                             to_pos: Vector3,
-                            dir):   #1(Up), 0(Free), -1(Down)
-        # land on ground
-        body_z = self._get_all_z_index(to_pos.z)
-        if body_z[2]<0 and SceneGenerator.is_in_grid(to_pos.xy):    
+                            dir):   #1(Up), 0(Free), -1(Down) 
+        # landing
+        foot = to_pos.z - body_height
+        if foot<0 and SceneGenerator.is_in_grid(to_pos.xy):
             self.land_sound.play()
             return True
         
-        # decide check points
-        if dir == 1:
-            body_z = body_z[:1]
-        elif dir == -1:
-            body_z = body_z[2:]
-        elif body_z[1] == body_z[2]:
-            body_z = body_z[:2]
-        
-        corners = self._get_all_xy_index(to_pos)
-        for (x, y) in corners:
-            for z in body_z:
-                if (x, y, z) in self.scene_map:
-                    return True
+        for grid in Grid3D.get_grids(to_pos, dir):
+            if grid in self.scene_map:
+                return True
         return False
-            
-    def get_eye_position(self, eye_pos: Vector3):
+    
+    def is_on_air(self, eye_pos: Vector3):
+        foot = eye_pos.z - body_height
+        if (foot<base_center[2]) and (SceneGenerator.is_in_grid(eye_pos.xy)):
+            return False
+        
+        foot -= half_unit
+        z_index = int(foot / unit_size)
+        corners = Grid3D.get_box_2d(eye_pos)
+        for corner in corners:
+            x, y = Grid3D.point_2d_to_index(corner)
+            if (x, y, z_index) in self.scene_map:
+                return False
+        return True
+    
+    def is_land_on_cube(self, eye_pos: Vector3, center: Vector3):
+        center_index = Grid3D.offset_3d_to_index(center)
+        z_index = int((eye_pos.z-body_height-half_unit) / unit_size)
+        corners = Grid3D.get_box_2d(eye_pos)
+        for corner in corners:
+            x, y = Grid3D.point_2d_to_index(corner)
+            if (x, y, z_index) == center_index:
+                return True
+        return False
+    
+    def detect_clash_with_live_cube(self, eye: Vector3, time: float):
+        for grid in Grid3D.get_grids(eye):
+            if grid in self.live_map:
+                index = self.live_map[grid]
+                self.live_cube = LiveCube(index)
+                pos = self.live_cube.get_position(time) 
+                return AABB.get_penetration(eye, pos)
+        return None
+        
+    def is_clash_with_live_cube(self, eye: Vector3, time: float):
+        for grid in Grid3D.get_grids(eye, None):
+            if grid in self.live_map:
+                index = self.live_map[grid]
+                self.live_cube = LiveCube(index)
+                pos = self.live_cube.get_position(time) 
+                return AABB.is_intersect(eye, pos)
+        return False
+        
+    def is_land_on_live_cube(self, eye: Vector3, time: float):
+        pos = self.live_cube.get_position(time)
+        return AABB.is_land_on(eye, pos)
+    
+    def reset_eye_position(self, eye_pos: Vector3):
         eye_z = eye_pos.z
-        x, y, z = self._point_3d_to_index(eye_pos.tolist())
+        x, y, z = Grid3D.point_3d_to_index(eye_pos.tolist())
         while ((x, y, z) in self.scene_map) or ((x, y, z-1) in self.scene_map): 
             z += 1
             eye_z += unit_size
@@ -58,15 +102,41 @@ class ClashDetector(object):
         if z<=1 and (not SceneGenerator.is_in_grid(eye_pos.xy)):
             return None  
         return Vector3([eye_pos.x, eye_pos.y, eye_z])
+    
+    # Validate if we can place cube in the position
+    # 0: Ok to put
+    # 1: Below ground is not allowed
+    # 2: Clash with static cube
+    # 3: Clash with Live cube
+    # 4: Clash with eye 
+    def validate_placement(self, target, eye_pos: Vector3=None):
+        if target[2] < 0:
+            logger.warning("Cannot put cube below ground!")
+            return False
+        
+        cube = Grid3D.offset_3d_to_index(target)
+        if cube in self.scene_map:
+            logger.warning("Clash with static cube!")
+            return False
+        if cube in self.live_map:
+            logger.warning("Clash with live cube!")
+            return False
+        
+        if eye_pos is not None:
+            for grid in Grid3D.get_grids(eye_pos):
+                if cube == grid:
+                    logger.warning("Too close to eye!")
+                    return False
+        return True
           
     def _get_clash_points(self, pos: Vector3):
         index = 0x01
         clash_points = 0x00
-        corners = self._get_box_2d(pos)
+        corners = Grid3D.get_box_2d(pos)
         eye_z = int(pos.z / unit_size)
         for corner in corners:
             clash = 0x00
-            x, y = self._point_2d_to_index(corner)
+            x, y = Grid3D.point_2d_to_index(corner)
             if (x, y, eye_z-1) in self.scene_map:   #check body
                 clash += index
             if (x, y, eye_z) in self.scene_map:   #check head
@@ -107,96 +177,14 @@ class ClashDetector(object):
         else:
             self.move_direction = 0x03
         return next_pos
-    
-    def _is_on_air(self, eye_pos: Vector3):
-        foot = eye_pos.z - body_height
-        if (foot<base_center[2]) and (SceneGenerator.is_in_grid(eye_pos.xy)):
-            return False
-        
-        foot -= half_unit
-        z_index = int(foot / unit_size)
-        corners = self._get_box_2d(eye_pos)
-        for corner in corners:
-            x, y = self._point_2d_to_index(corner)
-            if (x, y, z_index) in self.scene_map:
-                return False
-        return True
-        
-    @classmethod 
-    def is_clash_with_eye(cls, center, eye_pos: Vector3):
-        cube_index = cls._offset_3d_to_index(center)
-        corners = cls._get_box_2d(eye_pos)
-        eye_z = int(eye_pos.z / unit_size)
-        for corner in corners:
-            x, y = cls._point_2d_to_index(corner)
-            if (x, y, eye_z-1) == cube_index:   #check leg
-                return True
-            if (x, y, eye_z) == cube_index:   #check head
-                return True
-        return False
-    
-    @classmethod
-    def _get_all_z_index(cls, eye_z_pos):
-        eye_dz = eye_z_pos + body_clash - base_center[2]
-        leg_dz = eye_z_pos - unit_size - base_center[2]
-        foot_dz = eye_z_pos - body_height - base_center[2]
-        return cls._offsets_to_index((eye_dz, leg_dz, foot_dz))
-    
-    @classmethod
-    def _get_all_xy_index(cls, pos: Vector3):
-        left = pos.x - body_clash - base_center[0] 
-        right = pos.x + body_clash - base_center[0]
-        bottom = pos.y - body_clash - base_center[1]
-        top = pos.y + body_clash - base_center[1]
-        corners = cls._offsets_to_index((left, right, bottom, top))
-        return ((corners[0], corners[3]),
-                (corners[1], corners[3]),
-                (corners[1], corners[2]),
-                (corners[0], corners[2]))
-        
-    @classmethod
-    def _get_box_2d(cls, pos: Vector3):
-        left = pos.x - body_clash
-        right = pos.x + body_clash
-        bottom = pos.y - body_clash
-        top = pos.y + body_clash
-        corners = ((left, top), (right, top), (right, bottom), (left, bottom))
-        return corners
-    
-    @classmethod
-    def _point_2d_to_index(cls, point):
-        dx = point[0] - base_center[0]
-        dy = point[1] - base_center[1]
-        index_x = int((dx+half_unit)/unit_size) if dx>=0 else int((dx-half_unit)/unit_size)
-        index_y = int((dy+half_unit)/unit_size) if dy>=0 else int((dy-half_unit)/unit_size)
-        return (index_x, index_y)
-    
-    @classmethod
-    def _point_3d_to_index(cls, point):
-        dx = point[0] - base_center[0]
-        dy = point[1] - base_center[1]
-        dz = point[2] - base_center[2]
-        return cls._offset_3d_to_index((dx, dy, dz))
-          
-    @classmethod
-    def _offset_3d_to_index(cls, offset):
-        index_x = int((offset[0]+half_unit)/unit_size) if offset[0]>=0 else int((offset[0]-half_unit)/unit_size)
-        index_y = int((offset[1]+half_unit)/unit_size) if offset[1]>=0 else int((offset[1]-half_unit)/unit_size)
-        index_z = int((offset[2]+half_unit)/unit_size) if offset[2]>=0 else int((offset[2]-half_unit)/unit_size)
-        return (index_x, index_y, index_z)
-    
-    @classmethod
-    def _offsets_to_index(cls, offsets):
-        all_index = []
-        for offset in offsets:
-            index = int((offset+half_unit)/unit_size) if offset>=0 else int((offset-half_unit)/unit_size)
-            all_index.append(index)
-        return all_index
               
 class SceneTracker(object):
     def __init__(self):
         self.scene_map = dict()
-        self.clash_dector = ClashDetector(self.scene_map)
+        self.live_map = dict()
+        self.follow_up = None
+        self.fall_down = False
+        self.clash_dector = ClashDetector(self.scene_map, self.live_map)
         
     def reload(self, cubes: list):
         self.scene_map.clear()
@@ -204,49 +192,88 @@ class SceneTracker(object):
     
     def move_to(self,
                 from_pos: Vector3,
-                to_pos: Vector3):
-        return self.clash_dector.detect_clash_in_move(from_pos, to_pos)
-        
+                to_pos: Vector3,
+                time: float,
+                linked = False):
+        if not linked:
+            current_pos = self.clash_dector.detect_clash_in_move(from_pos, to_pos)
+            if not self.clash_dector.is_clash_with_live_cube(current_pos, time):
+                fall_down = self.clash_dector.is_on_air(current_pos)
+                return (current_pos, fall_down)
+            return (from_pos, False)
+        else:
+            fall_down = not self.clash_dector.is_land_on_live_cube(to_pos, time)
+            return (to_pos, fall_down)
+    
     def fly_to(self,
                from_pos: Vector3,
                to_pos: Vector3,
-               dir = 0):
-        return not self.clash_dector.detect_clash_in_fly(to_pos, dir)
-    
+               dir, time: float):
+        if self.clash_dector.detect_clash_in_fly(to_pos, dir):
+            return (from_pos, ClashType.Static)
+        penetration = self.clash_dector.detect_clash_with_live_cube(to_pos, time)
+        if penetration is not None:
+            next_pos = to_pos - penetration
+            if penetration.z > ZERO:
+                return (next_pos, ClashType.LivePZ)
+            elif penetration.z < -ZERO:
+                return (next_pos, ClashType.LiveNZ)
+            return (next_pos, ClashType.LiveXY)
+        return (to_pos, ClashType.NoClash)
+
     def add_cubes(self, cubes: list):
         count = len(cubes)
         for i in range(0, count, 6):
             self.add_cube((cubes[i],cubes[i+1],cubes[i+2]))
            
     def add_cube(self, center = (0.0, 0,0, 0.0)):
-        center_key = self.clash_dector._offset_3d_to_index(center)
+        center_key = Grid3D.offset_3d_to_index(center)
         self.scene_map[center_key] = True
     
     def remove_cube(self, center = (0.0, 0.0, 0.0)):
-        center_key = self.clash_dector._offset_3d_to_index(center)
+        center_key = Grid3D.offset_3d_to_index(center)
         if center_key in self.scene_map:
             del self.scene_map[center_key]
     
-    def get_eye_position(self, pos):
-        return self.clash_dector.get_eye_position(pos)
+    def add_live_cube(self, index):
+        cube = LiveCube(index)
+        for grid in cube.get_range():
+            self.live_map[grid] = index
         
-    @classmethod
-    def is_clashed(cls, center, eye_pos: Vector3):
-        return ClashDetector.is_clash_with_eye(center, eye_pos)
+    def reset_eye_position(self, pos):
+        return self.clash_dector.reset_eye_position(pos)
     
-    # def log_info(self):
-    #     logger.info(
-    #         "current pos: ({:.2f}, {:.2f}, {:.2f})".format(x, y, z))
-        
-        
-    
-    
+    def validate_placement(self, center, eye_pos: Vector3):
+        return self.clash_dector.validate_placement(center, eye_pos)
+              
+    def validate_movement(self, 
+                          from_center:Vector3, 
+                          to_center:Vector3, 
+                          eye_pos:Vector3):
+        if self.clash_dector.is_land_on_cube(eye_pos, from_center):
+            if not self.clash_dector.validate_placement(to_center):
+                return False
             
+            diff = to_center - from_center
+            target = eye_pos + diff - Vector3(base_center)
+            if not self.clash_dector.validate_placement(target):
+                return False
+            target.z -= unit_size
+            if not self.clash_dector.validate_placement(target):
+                return False
+            
+            self.follow_up = diff
+            return True
+        return self.clash_dector.validate_placement(to_center, eye_pos)
     
+    def validate_remove(self, center, eye_pos: Vector3):
+         if self.clash_dector.is_land_on_cube(eye_pos, center):
+             self.fall_down = True
         
+    @property
+    def clashed_cube(self):
+        return self.clash_dector.live_cube
     
-        
-        
-        
-        
+    
+    
         

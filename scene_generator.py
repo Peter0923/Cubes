@@ -1,9 +1,10 @@
 import numpy
+from enum import Enum
 from os import path
 from resource_manager import ResourceManger
 
-#grid size: (2*ground_width) * (2*ground_width)
-#unit size: (2*ground_width) / (ground_steps-1)
+# grid size: (2*ground_width) * (2*ground_width)
+# unit size: (2*ground_width) / (ground_steps-1)
 unit_size = 1
 half_unit = 0.5
 ground_width = 15.5
@@ -11,6 +12,11 @@ ground_width = 15.5
 ground_steps = int(ground_width*2 / unit_size) + 1
 base_center = (0, 0, half_unit)
 
+# actor size:
+body_height = 1.5 * unit_size  #not higher than 2 units
+body_clash = 0.1 * unit_size
+
+# color plate
 colors = {
     0: None,
     1: (1.0, 0.0, 0.0),
@@ -21,7 +27,18 @@ colors = {
     6: (0.0, 0.0, 1.0),
     7: (0.5, 0.0, 1.0),
     8: (0.5, 0.5, 0.0),
-    9: (0.1, 0.1, 0.1)}
+    9: (0.1, 0.1, 0.1)
+    }
+
+# key actions
+class KeyActions(Enum):
+    FORWARD = 0
+    BACKWARD = 1
+    LEFT = 2
+    RIGHT = 3
+    JUMP = 4
+    UP = 5
+    DOWN = 6
 
 class SceneGenerator(object):
     @classmethod
