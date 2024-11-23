@@ -1,7 +1,6 @@
 import numpy
 from enum import Enum
 from os import path
-from resource_manager import ResourceManger
 
 # grid size: (2*ground_width) * (2*ground_width)
 # unit size: (2*ground_width) / (ground_steps-1)
@@ -160,22 +159,6 @@ class SceneGenerator(object):
         return normal_data.astype('f4')
     
     @classmethod
-    def load_cubes(cls, name="cubes0"):
-        data = ResourceManger.load_data(f"data/{name}.scene")
-        cubes = list(map(float, data.split()))
-        return cubes
-    
-    @classmethod
-    def save_cubes(cls, cubes: list, name="cubes0"):
-        length = len(cubes)
-        file_path = path.join(ResourceManger.resource_dir, f"data/{name}.scene")
-        with open(file_path, "w") as file:
-            for i in range(0, length, 6):
-                # file.write(f"{cubes[i]} {cubes[i+1]} {cubes[i+2]} {cubes[i+3]} {cubes[i+4]} {cubes[i+5]}\n")
-                file.write("{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}\n".format(
-                    cubes[i], cubes[i+1], cubes[i+2], cubes[i+3], cubes[i+4], cubes[i+5]))
-    
-    @classmethod
     def gen_cube_instances_0(cls):
         half_unit = unit_size / 2
         cube_instances = [
@@ -202,9 +185,3 @@ class SceneGenerator(object):
                         numpy.random.uniform(0, 1),
                         numpy.random.uniform(0, 1)])
         return cube_instances
-
-# test scene loader
-if __name__ == '__main__':
-    cubes = SceneGenerator.gen_cube_instances_0()
-    ResourceManger.initialize()
-    SceneGenerator.save_cubes(cubes)

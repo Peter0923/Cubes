@@ -1,5 +1,4 @@
 import uuid
-import enum
 from PIL import Image
 from moderngl_window import BaseWindow
 from scene_generator import colors, KeyActions
@@ -11,14 +10,8 @@ from ground_render import GroundRender
 from cube_render import CubeRender
 from live_render import LiveCubeRender
 from pyrr import Matrix44
-
-class MoveMode(enum.Enum):
-    Camera = 0
-    Cube = 1
     
 class SceneBuilder(object):
-    move_mode = MoveMode.Camera
-      
     def __init__(self, wnd: BaseWindow):
         self.wnd = wnd
         self.ctx = self.wnd.ctx
@@ -84,10 +77,7 @@ class SceneBuilder(object):
         keys = self.wnd.keys
         key_pressed = (action == keys.ACTION_PRESS)
         if key in self.key_map:
-            if self.move_mode == MoveMode.Camera:   #move camera
-                self.camera.move_state(self.key_map[key], key_pressed)
-            elif key_pressed:   #move object
-                self.scene.move_step(self.key_map[key], self.camera.position, self.camera.dir)
+            self.camera.move_state(self.key_map[key], key_pressed)
         elif key_pressed:
             if keys.NUMBER_0 <= key <= keys.NUMBER_9:
                 self.scene.cube_color = colors[key-keys.NUMBER_0]
@@ -97,8 +87,6 @@ class SceneBuilder(object):
                 self.scene.save()
             elif key == keys.P:
                 self.capture_screen()
-            elif key == keys.M:
-                self.move_mode = MoveMode(1 - self.move_mode.value)
             
     def mouse_press(self, x: int, y: int, button: int):
         self.building = True
@@ -114,10 +102,10 @@ class SceneBuilder(object):
         
         self.fbo.use()
         if button == 1:
-            if self.move_mode == MoveMode.Camera:
-                self.scene.add_cube(target_x, target_y, self.camera.position)
-            else:
+            if self.wnd.modifiers.ctrl:
                 self.scene.select_cube(target_x, target_y)
+            else:
+                self.scene.add_cube(target_x, target_y, self.camera.position) 
         elif button == 2:
             self.scene.remove_cube(target_x, target_y, self.camera.position)
                

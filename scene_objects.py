@@ -1,5 +1,8 @@
+from os import path
 from pyrr import Vector3
+from logger import logger
 from scene_generator import half_unit, unit_size, body_height, body_clash, base_center
+from resource_manager import ResourceManger
 
 cube_faces = ((1, 0, 0), (-1, 0, 0), 
               (0, 1, 0), (0, -1, 0), 
@@ -153,9 +156,34 @@ class Grid3D(object):
 class SceneObjects(object):
     cubes = []
     live_cubes = []
-               
-               
-         
-            
-        
-        
+    
+    @classmethod
+    def load_cubes(cls, name: str):
+        try:
+            data = ResourceManger.load_data(f"data/{name}.scene")
+        except:
+            logger.error(f"Error reading file: {name}.scene")
+            return []
+        else:
+            cubes = list(map(float, data.split()))
+            return cubes
+    
+    @classmethod
+    def save_cubes(cls, cubes: list, name: str):
+        length = len(cubes)
+        file_path = path.join(ResourceManger.resource_dir, f"data/{name}.scene")
+        with open(file_path, "w") as file:
+            for i in range(0, length, 6):
+                file.write("{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}\n".format(
+                    cubes[i], cubes[i+1], cubes[i+2], cubes[i+3], cubes[i+4], cubes[i+5]))
+    
+    @classmethod
+    def save_live_cubes(cls, live_cubes: list, name: str):
+        length = len(live_cubes)
+        file_path = path.join(ResourceManger.resource_dir, f"data/{name}.scene")
+        with open(file_path, "w") as file:
+            for i in range(0, length, 9):
+                file.write("{:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f} {:.2f}\n".format(
+                    live_cubes[i], live_cubes[i+1], live_cubes[i+2], 
+                    live_cubes[i+3], live_cubes[i+4], live_cubes[i+5],
+                    live_cubes[i+6], live_cubes[i+7], live_cubes[i+8]))

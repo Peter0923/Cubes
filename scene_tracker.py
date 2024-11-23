@@ -190,6 +190,10 @@ class SceneTracker(object):
         self.scene_map.clear()
         self.add_cubes(cubes)
     
+    def reload_live_cubes(self, cubes: list):
+        self.live_map.clear()
+        self.add_live_cubes(cubes)
+    
     def move_to(self,
                 from_pos: Vector3,
                 to_pos: Vector3,
@@ -235,6 +239,11 @@ class SceneTracker(object):
         if center_key in self.scene_map:
             del self.scene_map[center_key]
     
+    def add_live_cubes(self, cubes: list):
+        count = len(cubes)
+        for i in range(0, count, 9):
+            self.add_live_cube(i//9)
+    
     def add_live_cube(self, index):
         cube = LiveCube(index)
         for grid in cube.get_range():
@@ -249,15 +258,25 @@ class SceneTracker(object):
     def validate_movement(self, 
                           from_center:Vector3, 
                           to_center:Vector3, 
+                          action: KeyActions,
                           eye_pos:Vector3):
         if self.clash_dector.is_land_on_cube(eye_pos, from_center):
             if not self.clash_dector.validate_placement(to_center):
                 return False
             
             diff = to_center - from_center
+            if action == KeyActions.DOWN:
+                self.follow_up = diff
+                return True
+            
             target = eye_pos + diff - Vector3(base_center)
             if not self.clash_dector.validate_placement(target):
                 return False
+            
+            if action == KeyActions.UP:
+                self.follow_up = diff
+                return True
+            
             target.z -= unit_size
             if not self.clash_dector.validate_placement(target):
                 return False

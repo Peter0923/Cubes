@@ -1,7 +1,6 @@
 import numpy
 from OpenGL import GL
 import moderngl as gl
-from moderngl_window import BaseWindow
 from pyrr import Matrix44, Vector3
 from logger import logger
 from scene_generator import KeyActions, unit_size
@@ -21,8 +20,7 @@ class CubeRender(object):
                  tracker: SceneTracker):
         self.ctx = ctx
         self.tracker = tracker
-        self.selection = None  
-        self.cubes = SceneObjects.cubes  
+        self.selection = None
         self.init_scene()
         self.init_picker()
         self.init_move_map()
@@ -32,8 +30,7 @@ class CubeRender(object):
         self.cube_pos = self.ctx.buffer(SceneGenerator.cube())
         self.cube_color = None
         
-        # self.cubes.extend(SceneGenerator.gen_cube_instances_0())
-        self.cubes.extend(SceneGenerator.load_cubes())
+        self.cubes.extend(SceneObjects.load_cubes("cubes0"))
         self.tracker.reload(self.cubes)
             
         self.vbo = self.ctx.buffer(reserve = cube_max_number*24)
@@ -70,12 +67,12 @@ class CubeRender(object):
         self.cubes.clear()
         self.vbo.clear()
         if filename:
-            self.cubes.extend(SceneGenerator.load_cubes(filename))
+            self.cubes.extend(SceneObjects.load_cubes(filename))
             self.vbo.write(numpy.array(self.cubes).astype('f4'))
         self.tracker.reload(self.cubes)
     
     def save(self, filename = "cubes0"):
-        SceneGenerator.save_cubes(self.cubes, filename)
+        SceneObjects.save_cubes(self.cubes, filename)
      
     def set_projection(self, proj: Matrix44):
         self.prog['proj'].write(proj.astype('f4'))
@@ -132,7 +129,7 @@ class CubeRender(object):
     def select_cube(self, x, y):
         if self.cube_number <= 0:
             logger.warning("No cubes in the scene!")
-            return False
+            return
         
         GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT1)
         data = GL.glReadPixels(x, y, 1, 1, GL.GL_RED, GL.GL_FLOAT)
@@ -143,9 +140,9 @@ class CubeRender(object):
             self.cubes[6*id+5] = 1.0 - self.cubes[6*id+5]
             highlight = numpy.array(self.cubes[6*id+3 : 6*id+6]).astype('f4')
             self.vbo.write(highlight, 24*id+12)
+            logger.info("Selection: {:.2f} {:.2f} {:.2f}".format(
+                self.cubes[6*id+0], self.cubes[6*id+1], self.cubes[6*id+2]))
             self.selection = id
-            return True
-        return False
     
     def move_step(self, action: KeyActions, eye, front):
         id = self.selection
@@ -156,7 +153,7 @@ class CubeRender(object):
         move_dir = self.decide_move_dir(action, front)
         new_pos = old_pos + move_dir
         
-        if self.tracker.validate_movement(old_pos, new_pos, eye):
+        if self.tracker.validate_movement(old_pos, new_pos, action, eye):
             self.cubes[6*id] = new_pos[0]
             self.cubes[6*id+1] = new_pos[1]
             self.cubes[6*id+2] = new_pos[2]
@@ -164,12 +161,13 @@ class CubeRender(object):
             self.tracker.remove_cube(old_pos)
             self.tracker.add_cube(new_pos)
     
-    def decide_move_dir(self, action: KeyActions, front: Vector3):
+    def decide_move_dir(self, action: KeyActions, front):
+        front_x, front_y = front[0], front[1]
         dir = Vector3([0.0, 0.0, 0.0])
-        if abs(front.y) >= abs(front.x):
-            dir.y = 1.0 if front.y>0 else -1.0
+        if abs(front_y) >= abs(front_x):
+            dir.y = 1.0 if front_y>0 else -1.0
         else:
-            dir.x = 1.0 if front.x>0 else -1.0
+            dir.x = 1.0 if front_x>0 else -1.0
         return unit_size * self.cube_move_map[action](dir)
     
     def render_picker(self):
@@ -177,6 +175,10 @@ class CubeRender(object):
         
     def render(self):
         self.vao.render(gl.TRIANGLES, instances=self.cube_number)
+    
+    @property
+    def cubes(self):
+        return SceneObjects.cubes
     
     @property
     def cube_number(self):

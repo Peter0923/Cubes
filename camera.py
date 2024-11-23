@@ -65,6 +65,10 @@ class Camera(object):
                     self.xdir = NEGATIVE
                 case KeyActions.RIGHT:
                     self.xdir = POSITIVE
+    
+    @property
+    def is_moving(self):
+        return self.xdir!=STILL or self.ydir!=STILL or self.zdir!=STILL
         
 # Orbit camera
 class OrbitCamera(Camera):
@@ -174,16 +178,16 @@ class WalkCamera(Camera):
                 self.reset_eye()
         
     def look_and_move(self, t, dt):
-        if self.link.linked:
-            self.position = self.link.get_linked_eye(t)
-        elif self.tracker.follow_up is not None:
-            self.position += self.tracker.follow_up
-            self.tracker.follow_up = None
-        elif self.tracker.fall_down:
-            self.zdir = NEGATIVE
-            self.tracker.fall_down = False
-            
-        if self.xdir!=STILL or self.ydir!=STILL or self.zdir!=STILL:
+        if not self.is_moving:
+            if self.link.linked:
+                self.position = self.link.get_linked_eye(t)
+            elif self.tracker.follow_up is not None:
+                self.position += self.tracker.follow_up
+                self.tracker.follow_up = None
+            elif self.tracker.fall_down:
+                self.zdir = NEGATIVE
+                self.tracker.fall_down = False
+        else:
             next_pos = self.position.copy()
             if self.xdir != STILL:
                 next_pos += self.right * self.xdir * self.velocity * dt
@@ -230,9 +234,8 @@ class WalkCamera(Camera):
                 if clash_type == ClashType.LiveNZ:
                     self.link.start_link(self.tracker.clashed_cube, self.position, t)
                 super().resume_move()
-        
-        # update flying up time
-        if self.zdir == POSITIVE:
+        elif self.zdir == POSITIVE:
+            # update flying up time
             self.fly_time += dt
             if self.fly_time >= self.max_fly_time:
                 self.zdir = NEGATIVE
